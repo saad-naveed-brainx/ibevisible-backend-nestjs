@@ -2,5 +2,5 @@ import { HealthService } from './health.service';
 export declare class HealthController {
     private readonly healthService;
     constructor(healthService: HealthService);
-    check(): import("./health.service").HealthStatus;
+    check(): Promise<import("./health.service").HealthStatus>;
 }
