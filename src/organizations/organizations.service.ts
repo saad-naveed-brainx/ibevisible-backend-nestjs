@@ -1,10 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Organization } from './organization.entity';
 
-/** The single POC organization, seeded by the InitAuth migration. */
-export const DEFAULT_ORGANIZATION_ID = '00000000-0000-0000-0000-000000000001';
+export interface CreateOrganizationInput {
+  name: string;
+  baseDomain?: string | null;
+}
 
 @Injectable()
 export class OrganizationsService {
@@ -17,24 +19,12 @@ export class OrganizationsService {
     return this.organizations.findOne({ where: { id } });
   }
 
-  /**
-   * The organization new users are attached to during the single-org POC
-   * (Decision D1). Falls back to the first organization if the seeded id is
-   * ever missing.
-   */
-  async getDefault(): Promise<Organization> {
-    const seeded = await this.findById(DEFAULT_ORGANIZATION_ID);
-    if (seeded) {
-      return seeded;
-    }
-
-    const first = await this.organizations.find({
-      order: { createdAt: 'ASC' },
-      take: 1,
+  /** Creates a brand-new tenant, e.g. for a self-serve signup (FR-1.1). */
+  create(input: CreateOrganizationInput): Promise<Organization> {
+    const organization = this.organizations.create({
+      name: input.name.trim(),
+      baseDomain: input.baseDomain?.trim() || null,
     });
-    if (first.length === 0) {
-      throw new NotFoundException('No organization has been provisioned.');
-    }
-    return first[0];
+    return this.organizations.save(organization);
   }
 }

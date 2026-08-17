@@ -8,17 +8,20 @@ import { HealthModule } from './health/health.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { UsersModule } from './users/users.module';
 import { ContentModule } from './content/content.module';
+import { AiModule } from './ai/ai.module';
 import { Organization } from './organizations/organization.entity';
+import { Invitation } from './organizations/invitation.entity';
 import { User } from './users/user.entity';
 import { ContentItem } from './content/content-item.entity';
 import databaseConfig from './config/database.config';
 import authConfig from './config/auth.config';
+import aiConfig from './config/ai.config';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig, authConfig],
+      load: [databaseConfig, authConfig, aiConfig],
     }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
@@ -29,7 +32,7 @@ import authConfig from './config/auth.config';
         username: config.get<string>('database.user'),
         password: config.get<string>('database.password'),
         database: config.get<string>('database.name'),
-        entities: [Organization, User, ContentItem],
+        entities: [Organization, Invitation, User, ContentItem],
         // Schema is managed via migrations (see src/database/migrations),
         // never let the ORM alter it.
         synchronize: false,
@@ -38,6 +41,7 @@ import authConfig from './config/auth.config';
     OrganizationsModule,
     UsersModule,
     ContentModule,
+    AiModule,
     AuthModule,
     HealthModule,
   ],

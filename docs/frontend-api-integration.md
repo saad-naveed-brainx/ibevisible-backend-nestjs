@@ -42,13 +42,25 @@ failures — handle both.
 ## 2. Auth
 
 ### `POST /api/auth/signup` — register
-Public. Creates a user in the single POC organization and returns a token.
+Public. Supports **multi-organization** signup in two modes:
 
-Request:
+**1. Create a new organization** (no `inviteToken`) — `organizationName` is required and becomes a brand-new tenant with this user as its first member, with role **`owner`**:
 ```json
-{ "email": "owner@shop.com", "password": "at-least-8-chars", "fullName": "Jane Doe" }
+{ "email": "owner@shop.com", "password": "at-least-8-chars", "fullName": "Jane Doe", "organizationName": "Jane's Shop" }
 ```
-`fullName` is optional. Response `201`: `AuthResult` (see types).
+
+**2. Join via invite** (`inviteToken` present) — `organizationName` is ignored; the email **must match** the invited email exactly, or the request fails with `400`. The new user's role is always **`content_creator`**:
+```json
+{ "email": "teammate@shop.com", "password": "at-least-8-chars", "fullName": "Sam", "inviteToken": "<token from the invite link>" }
+```
+
+`fullName` is optional in both modes. Response `201`: `AuthResult` (see types).
+Invalid/expired/already-used invite token, or an email/invite mismatch → `400`.
+
+### Roles ("invite content creators")
+Every user has a `role`, set once at signup and never changed:
+- **`owner`** — created the organization. Can invite/revoke content creators and see pending invites.
+- **`content_creator`** — joined via an invite link. Can see the team roster but cannot manage invites (`403` on invite-management routes below). Content authoring (§4) is unrestricted for both roles.
 
 ### `POST /api/auth/login` — authenticate
 Public. Request: `{ "email", "password" }`. Response `200`: `AuthResult`.
@@ -67,7 +79,43 @@ JWTs are stateless — also discard the token client-side.
 
 ---
 
-## 3. Content
+## 3. Organizations & team (multi-organization support)
+
+Every organization is an isolated tenant — a user belongs to exactly one, and
+every route below acts only on the caller's own organization.
+
+### `GET /api/organizations/me` — the caller's organization
+Auth required. Response `200`: `OrganizationProfile`.
+
+### `GET /api/organizations/members` — everyone in the caller's organization
+Auth required (any role). Response `200`: `OrganizationMember[]` — each row
+includes `role` (`owner` | `content_creator`).
+
+### `POST /api/organizations/invitations` — invite a content creator
+**Owner-only** (`403` for content creators). Request:
+`{ "email": "teammate@shop.com" }`. Response `201`: `CreatedInvitation` —
+**the `token` is only ever returned here**; build the invite link
+client-side as `{origin}/signup?invite={token}` and share it out-of-band
+(there is no email-sending in the POC). Invitations expire after 7 days.
+
+### `GET /api/organizations/invitations` — invites sent from this organization
+**Owner-only** (`403` for content creators). Response `200`:
+`InvitationSummary[]` (status is `pending`, `accepted`, or `expired`; the
+token itself is never re-exposed).
+
+### `DELETE /api/organizations/invitations/:id` — revoke a pending invite
+**Owner-only** (`403` for content creators), scoped to the caller's
+organization. Response `204`. Not found / not yours / already accepted →
+`404`/`403`.
+
+### `GET /api/organizations/invitations/:token` — preview an invite
+Public (no auth) — used by the signup page to show which organization a link
+belongs to before an account exists. Response `200`: `InvitationPreview`.
+Invalid/expired token → `404`.
+
+---
+
+## 4. Content
 
 All routes require auth and act only on **your** organization's content.
 
@@ -138,7 +186,7 @@ Sets `status=draft` (keeps `publishedAt`). Response `200`: `ContentItemResponse`
 
 ---
 
-## 4. Type-specific `metadata` per content type
+## 5. Type-specific `metadata` per content type
 
 Base fields (`title`, `slug`, `summary`, `body`, `tags`, `author`) live at the
 top level. The `metadata` object holds the fields unique to each type:
@@ -172,7 +220,41 @@ POST /api/content
 
 ---
 
-## 5. TypeScript types (copy into the frontend)
+## 5a. AI content drafting
+
+### `POST /api/ai/generate-content` — generate a draft
+
+Auth required. Takes a content type and a free-text brief; returns a draft shaped
+like `CreateContentDto` (minus `type`) for the caller to review and edit before
+saving — nothing is created or persisted by this call.
+
+Request:
+
+```json
+{ "type": "newsletter", "prompt": "Announce our new storefront theme, upbeat tone" }
+```
+
+Response `200`:
+
+```json
+{
+  "title": "Say Hello to Our New Storefront Theme",
+  "summary": "We've refreshed the storefront with a faster, cleaner design.",
+  "body": "We're excited to introduce...",
+  "tags": ["product", "announcement"],
+  "metadata": { "subjectLine": "Your storefront just got a facelift", "previewText": "See what's new", "issueNumber": null }
+}
+```
+
+`metadata` always includes every field the type defines (see §5); fields the
+model can't know (e.g. `videoUrl`, `audioUrl`) come back as an empty string —
+the user fills those in manually. `400` on an unsupported `type` or empty
+`prompt`; `500` if the generation call itself fails (rare — surface the message
+and let the user retry).
+
+---
+
+## 6. TypeScript types (copy into the frontend)
 
 ```ts
 // ---- enums ----
@@ -181,16 +263,50 @@ export type ContentType =
 export type ContentStatus = 'draft' | 'published';
 
 // ---- auth ----
+export type UserRole = 'owner' | 'content_creator';
 export interface UserProfile {
   id: string;
   email: string;
   fullName: string | null;
   organizationId: string;
+  role: UserRole;
   createdAt: string; // ISO date
 }
 export interface AuthResult {
   accessToken: string;
   user: UserProfile;
+}
+
+// ---- organizations & invitations ----
+export interface OrganizationProfile {
+  id: string;
+  name: string;
+  baseDomain: string | null;
+  createdAt: string; // ISO date
+}
+export interface OrganizationMember {
+  id: string;
+  email: string;
+  fullName: string | null;
+  role: UserRole;
+  createdAt: string; // ISO date
+}
+export interface InvitationSummary {
+  id: string;
+  email: string;
+  status: 'pending' | 'accepted' | 'expired';
+  createdAt: string; // ISO date
+  expiresAt: string; // ISO date
+}
+export interface CreatedInvitation {
+  id: string;
+  email: string;
+  token: string;      // only ever returned here — build the invite link client-side
+  expiresAt: string;  // ISO date
+}
+export interface InvitationPreview {
+  organizationName: string;
+  email: string;
 }
 
 // ---- content: type-specific metadata ----
@@ -267,11 +383,20 @@ export interface CreateContentInput {
   metadata?: Record<string, unknown>;
 }
 export type UpdateContentInput = Partial<Omit<CreateContentInput, 'type'>>;
+
+// ---- content: AI drafting ----
+export interface GeneratedContentDraft {
+  title: string;
+  summary: string;
+  body: string;
+  tags: string[];
+  metadata: Record<string, unknown>;
+}
 ```
 
 ---
 
-## 6. Minimal fetch client
+## 7. Minimal fetch client
 
 ```ts
 const BASE_URL = 'http://localhost:3000/api';
@@ -310,13 +435,30 @@ export async function login(email: string, password: string) {
   localStorage.setItem('accessToken', token);
   return result;
 }
-export const signup = (body: { email: string; password: string; fullName?: string }) =>
+export const signup = (body: {
+  email: string;
+  password: string;
+  fullName?: string;
+  organizationName?: string; // required unless inviteToken is set
+  inviteToken?: string;      // join that invite's org instead of creating one
+}) =>
   api<AuthResult>('/auth/signup', { method: 'POST', body: JSON.stringify(body) })
     .then((r) => { token = r.accessToken; localStorage.setItem('accessToken', token); return r; });
 export const me = () => api<UserProfile>('/auth/me');
 export const logout = () =>
   api<{ success: true }>('/auth/logout', { method: 'POST' })
     .finally(() => { token = null; localStorage.removeItem('accessToken'); });
+
+// organizations & team
+export const getMyOrganization = () => api<OrganizationProfile>('/organizations/me');
+export const listMembers = () => api<OrganizationMember[]>('/organizations/members');
+export const listInvitations = () => api<InvitationSummary[]>('/organizations/invitations');
+export const inviteTeammate = (email: string) =>
+  api<CreatedInvitation>('/organizations/invitations', { method: 'POST', body: JSON.stringify({ email }) });
+export const revokeInvitation = (id: string) =>
+  api<void>(`/organizations/invitations/${id}`, { method: 'DELETE' });
+export const previewInvitation = (token: string) =>
+  api<InvitationPreview>(`/organizations/invitations/${token}`);
 
 // content
 export const getContentTypes = () => api<ContentTypeDefinition[]>('/content/types');
@@ -335,22 +477,40 @@ export const publishContent = (id: string) =>
   api<ContentItemResponse>(`/content/${id}/publish`, { method: 'POST' });
 export const unpublishContent = (id: string) =>
   api<ContentItemResponse>(`/content/${id}/unpublish`, { method: 'POST' });
+
+// AI drafting
+export const generateContent = (type: ContentType, prompt: string) =>
+  api<GeneratedContentDraft>('/ai/generate-content', {
+    method: 'POST',
+    body: JSON.stringify({ type, prompt }),
+  });
 ```
 
 ---
 
-## 7. Suggested UI flow
+## 8. Suggested UI flow
 
-1. **Auth gate** — signup/login → store token → route to workspace.
-2. **Content list** (`GET /content`) — table of type/title/status/updated, with
+1. **Auth gate** — signup (new org, or via `?invite=<token>` link → preview +
+   join) / login → store token → route to workspace.
+2. **Team page** — `GET /organizations/me` + `/members` + `/invitations` to
+   show the workspace and who's in it; invite form posts to
+   `/organizations/invitations` and surfaces the returned `token` as a
+   shareable `{origin}/signup?invite={token}` link (there is no
+   email-sending in the POC).
+4. **Content list** (`GET /content`) — table of type/title/status/updated, with
    type & status filter dropdowns (`?type=&status=`).
-3. **Create** — pick a type, fetch `GET /content/types` once to know which
+5. **Create** — pick a type, fetch `GET /content/types` once to know which
    `metadata` fields to render for the chosen type, submit `POST /content`.
-4. **Edit** — `GET /content/:id` → form → `PATCH /content/:id`.
-5. **Publish/Unpublish** — buttons calling the publish/unpublish endpoints;
+   Optionally, describe the content in a prompt box first and call
+   `POST /ai/generate-content` to prefill the form — the user still reviews
+   and edits before saving.
+6. **Edit** — `GET /content/:id` → form → `PATCH /content/:id`.
+7. **Publish/Unpublish** — buttons calling the publish/unpublish endpoints;
    on a `400`, surface the "missing required field(s)" message next to the form.
-6. **Delete** — confirm dialog → `DELETE /content/:id`.
+8. **Delete** — confirm dialog → `DELETE /content/:id`.
 
 > Not yet built (later stages, scope §13): public rendered pages, SEO/JSON-LD
-> metadata, sitemap/robots, and AI-assist. Those will add public read endpoints
-> and an AI drafting endpoint.
+> metadata, sitemap/robots. Those will add public read endpoints.
+>
+> AI-assist (§5a) is now available: `POST /api/ai/generate-content` drafts a
+> full content item from a type + prompt for the user to review before saving.

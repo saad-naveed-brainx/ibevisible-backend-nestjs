@@ -20,11 +20,14 @@ const health_module_1 = require("./health/health.module");
 const organizations_module_1 = require("./organizations/organizations.module");
 const users_module_1 = require("./users/users.module");
 const content_module_1 = require("./content/content.module");
+const ai_module_1 = require("./ai/ai.module");
 const organization_entity_1 = require("./organizations/organization.entity");
+const invitation_entity_1 = require("./organizations/invitation.entity");
 const user_entity_1 = require("./users/user.entity");
 const content_item_entity_1 = require("./content/content-item.entity");
 const database_config_1 = __importDefault(require("./config/database.config"));
 const auth_config_1 = __importDefault(require("./config/auth.config"));
+const ai_config_1 = __importDefault(require("./config/ai.config"));
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -33,7 +36,7 @@ exports.AppModule = AppModule = __decorate([
         imports: [
             config_1.ConfigModule.forRoot({
                 isGlobal: true,
-                load: [database_config_1.default, auth_config_1.default],
+                load: [database_config_1.default, auth_config_1.default, ai_config_1.default],
             }),
             typeorm_1.TypeOrmModule.forRootAsync({
                 inject: [config_1.ConfigService],
@@ -44,13 +47,14 @@ exports.AppModule = AppModule = __decorate([
                     username: config.get('database.user'),
                     password: config.get('database.password'),
                     database: config.get('database.name'),
-                    entities: [organization_entity_1.Organization, user_entity_1.User, content_item_entity_1.ContentItem],
+                    entities: [organization_entity_1.Organization, invitation_entity_1.Invitation, user_entity_1.User, content_item_entity_1.ContentItem],
                     synchronize: false,
                 }),
             }),
             organizations_module_1.OrganizationsModule,
             users_module_1.UsersModule,
             content_module_1.ContentModule,
+            ai_module_1.AiModule,
             auth_module_1.AuthModule,
             health_module_1.HealthModule,
         ],

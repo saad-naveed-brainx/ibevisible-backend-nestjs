@@ -9,6 +9,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Organization } from '../organizations/organization.entity';
+import { UserRole } from './user-role.enum';
 
 /**
  * The organization user — the small-business owner or content manager
@@ -32,6 +33,10 @@ export class User {
 
   @Column({ name: 'organization_id', type: 'uuid' })
   organizationId: string;
+
+  /** Owner (created the org) or content creator (joined via invite). */
+  @Column({ type: 'varchar', length: 32, default: UserRole.Owner })
+  role: UserRole;
 
   @ManyToOne(() => Organization, (organization) => organization.users, {
     onDelete: 'CASCADE',
