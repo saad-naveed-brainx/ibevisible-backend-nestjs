@@ -17,10 +17,9 @@ async function bootstrap() {
     }),
   );
 
-  // Allow the frontend dev server to call the API during the POC.
-  const corsOrigin = process.env.CORS_ORIGIN ?? 'http://localhost:5173';
+  // Allow requests from any origin.
   app.enableCors({
-    origin: corsOrigin.split(',').map((o) => o.trim()),
+    origin: true,
     credentials: true,
   });
 
